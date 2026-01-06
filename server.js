@@ -39,16 +39,15 @@ wss.on('connection', (ws) => {
     try { data = JSON.parse(msg); } catch (e) { return; }
 
     if (data.type === 'createRoom') {
-      const passkey = makeKey();
-      rooms.set(passkey, { players: new Map(), sockets: new Set() });
-      ws._meta.passkey = passkey;
-      ws._meta.username = data.username;
-      const room = rooms.get(passkey);
-      room.sockets.add(ws);
-      room.players.set(data.username, { x: 50, y: 400, score: 0 });
-      ws.send(JSON.stringify({ type: 'roomCreated', passkey }));
-      broadcastRoom(passkey, { type: 'state', players: Object.fromEntries(room.players) });
-      return;
+      const { passkey, roomName, username } = data;
+      if (!passkey || !username) return;
+      rooms.set(passkey, {
+        name: roomName,
+        players: new Map([[username, { x: 0, y: 0, score: 0 }]]),
+        sockets: new Set([ws])
+      });
+      ws._meta = { passkey, username };
+      ws.send(JSON.stringify({ type: 'roomCreated', passkey, roomName }));
     }
 
     if (data.type === 'joinRoom') {
@@ -79,6 +78,19 @@ wss.on('connection', (ws) => {
       room.players.set(username, state);
       broadcastRoom(passkey, { type: 'state', players: Object.fromEntries(room.players) });
       return;
+    }
+
+    if (data.type === 'kick') {
+      const { target } = data;
+      const { passkey } = ws._meta;
+      const room = rooms.get(passkey);
+      if (!room) return;
+      for (const sock of room.sockets) {
+        if (sock._meta.username === target) {
+          sock.send(JSON.stringify({ type: 'kicked' }));
+          sock.close();
+        }
+      }
     }
   });
 
